@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Slower! - free open-source Transcribe! alternative to slow down music</title>
+  <meta name="description" content="Slow music down without changing its pitch, loop any bar and read the spectrogram to work out notes by ear. A free, open-source alternative to Seventh String Transcribe!, running entirely in your browser - nothing is uploaded." />
+  <link rel="canonical" href="https://slower.jmat.it/" />
+  <meta name="robots" content="index,follow" />
+  <meta name="author" content="Jonathan Mataloni" />
+  <meta name="theme-color" content="#080a0f" />
+  <meta name="color-scheme" content="dark" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Slower!" />
+  <meta property="og:url" content="https://slower.jmat.it/" />
+  <meta property="og:title" content="Slower! - free open-source Transcribe! alternative" />
+  <meta property="og:description" content="Slow music down without changing pitch, loop the hard bar, read the spectrogram. Free and open source, runs in the browser, nothing is uploaded." />
+  <meta property="og:image" content="https://slower.jmat.it/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Slower! - spectrogram of a track with a looped selection" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Slower! - free open-source Transcribe! alternative" />
+  <meta name="twitter:description" content="Slow music down without changing pitch, loop the hard bar, read the spectrogram. Free and open source, in the browser." />
+  <meta name="twitter:image" content="https://slower.jmat.it/og.png" />
+
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="alternate icon" href="./favicon.png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+  <link rel="stylesheet" href="/src/style.css" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Slower!",
+    "alternateName": "Slower",
+    "url": "https://slower.jmat.it/",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "Any web browser",
+    "isAccessibleForFree": true,
+    "description": "Free, open-source web app for transcribing music by ear: variable playback speed with the pitch untouched, looping over any part of a track, pinned reference notes and a navigable spectrogram. An alternative to Seventh String Transcribe!. Audio stays on the machine, nothing is uploaded.",
+    "featureList": [
+      "Slow playback down to 10% with the pitch unchanged (WSOLA time-stretch)",
+      "Loop any selection, seamlessly",
+      "Navigable WebGL spectrogram, linear or logarithmic",
+      "Pinned reference notes with pitch and scale degree, sounded on demand",
+      "Lettered time markers",
+      "Works offline, nothing is uploaded",
+      "Session and analysis cached in the browser"
+    ],
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+    "license": "https://opensource.org/license/mit",
+    "codeRepository": "https://github.com/jonamat/Slower",
+    "author": { "@type": "Person", "name": "Jonathan Mataloni" }
+  }
+  </script>
+</head>
+<body>
+  <header class="sr-only">
+    <h1>Slower! - slow music down and transcribe it by ear</h1>
+    <p>
+      A free and open-source web app for working out music by ear: play a track at
+      any speed from 10% to 150% with the pitch untouched, loop the bar you are
+      stuck on, pin reference notes on the spectrogram and hear them, and mark the
+      spots you care about. It is an alternative to Seventh String Transcribe!,
+      with which it is not affiliated, and it runs entirely in the browser: the
+      audio file never leaves your machine.
+    </p>
+    <ul>
+      <li>Variable speed without pitch change, using WSOLA time-stretching</li>
+      <li>Seamless looping over any selection</li>
+      <li>WebGL spectrogram with linear or logarithmic frequency axis</li>
+      <li>Pinned notes named by note or by scale degree in any of the 24 natural keys</li>
+      <li>Lettered markers along the timeline</li>
+      <li>MIT licensed, source on GitHub</li>
+    </ul>
+  </header>
+
+  <dialog id="welcome">
+    <h2>Slower!</h2>
+    <p class="lead">Slow it down, look at it, loop it.</p>
+    <dl class="guide wide">
+      <dt>right click · plot</dt><dd>pin a note, or drop it</dd>
+      <dt>right click · timeline</dt><dd>add a marker, or drop it</dd>
+      <dt>drag · loop bar</dt><dd>select a bit, it loops</dd>
+      <dt>wheel · drag</dt><dd>zoom · move</dd>
+    </dl>
+    <p class="fnote"></p>
+    <div class="factions">
+          Jonathan Mataloni
+      <a class="repo" href="https://github.com/jonamat/Slower" target="_blank" rel="noreferrer">github.com/jonamat/Slower</a>
+      <span class="spacer"></span>
+      <button class="btn" id="welcomeBtn" autofocus>Let's go</button>
+    </div>
+  </dialog>
+
+  <div class="shell">
+    <div id="app">
+      <header id="bar">
+        <label class="btn file">
+          Open track<input type="file" id="file" accept="audio/*,.tsa" hidden />
+        </label>
+
+        <button class="btn icon" id="play" title="Play / Pause (Space)" aria-label="Play">
+          <svg class="i i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.8v10.4L13 8z" /></svg>
+          <svg class="i i-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h3v10H4zM9 3h3v10H9z" /></svg>
+        </button>
+
+        <select id="playMode" title="What playback sounds: the track, the pinned notes, or both">
+          <option value="track" selected>Track only</option>
+          <option value="both">Track and notes</option>
+          <option value="notes">Notes only</option>
+        </select>
+
+        <div class="spacer"></div>
+
+        <div class="group rate">
+          <span class="klabel">speed</span>
+          <input type="range" id="rate" min="10" max="150" step="1" value="100"
+                 title="Playback speed (double click = 100%)" />
+          <span id="rateVal" class="mono">100%</span>
+        </div>
+
+        <div class="spacer"></div>
+
+        <select id="scale" title="How pinned notes are named: the note itself, or its degree in the chosen key (I, bIII, V…)">
+          <option value="chromatic" selected>Chromatic</option>
+        </select>
+
+        <button class="btn icon" id="setBtn" title="Menu" aria-label="Menu" aria-expanded="false">
+          <svg class="i stroke" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2 4.5h3.2M8.8 4.5H14M2 11.5h5.2M10.8 11.5H14" />
+            <circle cx="7" cy="4.5" r="1.8" /><circle cx="9" cy="11.5" r="1.8" />
+          </svg>
+        </button>
+      </header>
+
+      <div class="row">
+        <div class="pad"></div>
+        <canvas id="overview"></canvas>
+      </div>
+
+      <div class="row grow">
+        <canvas id="axis"></canvas>
+        <div class="plot" id="plot">
+          <canvas id="gl"></canvas>
+          <canvas id="ovl"></canvas>
+          <div id="drop">Drop an audio file or a .tsa archive here</div>
+          <div id="loading" class="hide" role="status" aria-live="polite">
+            <div class="spinner" aria-hidden="true"></div>
+            <span id="loadingText">Loading…</span>
+          </div>
+        </div>
+      </div>
+
+      <footer id="status">
+        <span id="stTime" class="mono">0:00.000</span>
+        <span id="stDur" class="mono dim">/ 0:00.000</span>
+        <span id="stCur" class="mono dim"></span>
+        <span class="spacer"></span>
+        <span id="stMsg" class="dim">No track loaded</span>
+        <button class="btn icon mini" id="zoomAll" title="Fit the whole track (0)"
+                aria-label="Fit the whole track">
+          <svg class="i stroke" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2.5 5.5v-3h3M13.5 5.5v-3h-3M2.5 10.5v3h3M13.5 10.5v3h-3" />
+          </svg>
+        </button>
+        <button class="btn icon mini" id="followBtn" title="Follow the cursor (F)"
+                aria-label="Follow the cursor">
+          <svg class="i" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 4v9.5" stroke="currentColor" stroke-width="1.6" fill="none" />
+            <path d="M4.5 2h7L8 6z" />
+          </svg>
+        </button>
+      </footer>
+    </div>
+
+    <aside id="menu" aria-label="Menu">
+      <div class="menu-inner">
+        <h2>Menu</h2>
+
+        <div class="frow">
+          <label class="tip" data-tip="Track on the left, notes on the right, both full in the middle" for="mix">Mix</label>
+          <input type="range" id="mix" min="-100" max="100" step="1" value="0"
+                 title="Left lowers the track, right lowers the notes (double click = centre)" />
+          <span id="mixVal" class="mono val">100 / 100</span>
+        </div>
+
+        <div class="frow">
+          <label class="tip" data-tip="Nudge the image against the audio. Latency is already compensated, so 0 is usually right" for="specOffset">Spectrum offset</label>
+          <input type="number" id="specOffset" min="-250" max="250" step="1" value="0" />
+          <span class="val dim">ms</span>
+        </div>
+
+        <div class="frow">
+          <label class="tip" data-tip="Log gives every octave the same height, plus semitone guides" for="freqScale">Frequency scale</label>
+          <select id="freqScale">
+            <option value="lin" selected>linear</option>
+            <option value="log">logarithmic</option>
+          </select>
+          <span class="val"></span>
+        </div>
+
+        <div class="frow">
+          <label class="tip" data-tip="Small: sharper attacks. Large: sharper pitch" for="fft">FFT window</label>
+          <select id="fft">
+            <option value="1024">1024 - sharper in time</option>
+            <option value="2048" selected>2048</option>
+            <option value="4096">4096</option>
+            <option value="8192">8192 - sharper in pitch</option>
+          </select>
+          <span class="val"></span>
+        </div>
+
+        <div class="frow">
+          <label class="tip" data-tip="Colours of the spectrogram" for="cmap">Colour map</label>
+          <select id="cmap">
+            <option value="magma" selected>magma</option>
+            <option value="viridis">viridis</option>
+            <option value="gray">grey</option>
+          </select>
+          <span class="val"></span>
+        </div>
+
+        <div class="frow">
+          <label class="tip" data-tip="Brightness. Raise it on quiet recordings" for="gain">Gain</label>
+          <input type="range" id="gain" min="-20" max="60" step="1" value="12" />
+          <span id="gainVal" class="mono val">12 dB</span>
+        </div>
+
+        <div class="frow">
+          <label class="tip" data-tip="dB the ramp spans. Small: more contrast, fewer partials" for="range">Dynamic range</label>
+          <input type="range" id="range" min="25" max="100" step="1" value="70" />
+          <span id="rangeVal" class="mono val">70 dB</span>
+        </div>
+
+        <h3>Track</h3>
+        <button class="btn wide tip" id="exportBtn"
+                data-tip="One .tsa file with the audio and everything you marked. Reopen it from “Open track”">Export track and markers</button>
+
+        <h3>Quick guide</h3>
+        <dl class="guide">
+          <dt>wheel</dt><dd>zoom time</dd>
+          <dt>ctrl · wheel</dt><dd>scroll</dd>
+          <dt>alt · wheel</dt><dd>zoom frequencies</dd>
+          <dt>drag</dt><dd>pan</dd>
+          <dt>click · ruler</dt><dd>move the cursor</dd>
+          <dt>drag · loop bar</dt><dd>select, it loops · click to clear</dd>
+          <dt>drag · loop edge</dt><dd>move that bound</dd>
+          <dt>shift · drag</dt><dd>select on the plot</dd>
+          <dt>right click · plot</dt><dd>pin a note, or drop it</dd>
+          <dt>right click · ruler</dt><dd>add a marker, or drop it</dd>
+          <dt>ctrl · click flag</dt><dd>drop that marker</dd>
+          <dt>drag · overview</dt><dd>move the view · shift selects</dd>
+        </dl>
+        <dl class="guide">
+          <dt>space</dt><dd>play / pause</dd>
+          <dt>A / B</dt><dd>selection start / end</dd>
+          <dt>esc</dt><dd>clear selection · close menu</dd>
+          <dt>M</dt><dd>marker at the cursor</dd>
+          <dt>← →</dt><dd>±1 s · shift ±5 s</dd>
+          <dt>+ −</dt><dd>zoom time</dd>
+          <dt>0</dt><dd>fit all</dd>
+          <dt>F</dt><dd>follow the cursor</dd>
+        </dl>
+
+        <p class="fnote">
+          Jonathan Mataloni ·
+          <a class="repo" href="https://github.com/jonamat/Slower" target="_blank" rel="noreferrer">github.com/jonamat/Slower</a>
+          · MIT
+        </p>
+      </div>
+    </aside>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
