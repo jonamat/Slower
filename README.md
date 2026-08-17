@@ -2,6 +2,8 @@
 
 Try it now at https://slower.jmat.it  
   
+![Slower! — a looped selection with pinned notes over the spectrogram](docs/screenshot.png)
+
 Slower! is a browser-based audio practice tool and a Transcribe! alternative for slowing down music without changing pitch. It lets you open a local track, inspect it in a spectrogram, loop sections, place markers, and pin notes.
 
 ## Main features
