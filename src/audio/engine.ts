@@ -47,6 +47,7 @@ export class AudioEngine {
         }
       } else if (m.type === 'end') { this.playing = false; this.onEnd?.(); }
     };
+    ctx.onstatechange = () => this.refreshLatency();
     this.ctx = ctx;
     this.node = node;
     this.trackGain = trackGain;
@@ -75,14 +76,21 @@ export class AudioEngine {
     return Math.max(0, this.posSamples / this.sampleRate);
   }
 
+  /** Clock the scheduling is done against, in seconds. */
+  get ctxTime(): number { return this.ctx?.currentTime ?? 0; }
+
   /** Output latency reported by the device, in seconds. */
   get latency(): number {
     const ctx = this.ctx as (AudioContext & { outputLatency?: number }) | null;
     return ctx?.outputLatency ?? ctx?.baseLatency ?? 0;
   }
 
-  /** Tells the worklet how much output the device still holds. */
-  private sendLatency(): void {
+  /**
+   * Tells the worklet how much output the device still holds. Worth repeating:
+   * the figure is not final when playback starts, and it changes if the output
+   * device does.
+   */
+  refreshLatency(): void {
     this.node?.port.postMessage({
       type: 'latency',
       samples: Math.round(this.latency * this.sampleRate),
@@ -94,7 +102,7 @@ export class AudioEngine {
     this.playing = true; // set first, so the UI needn't wait for resume()
     this.node.port.postMessage({ type: 'play' });
     await this.ctx!.resume();
-    this.sendLatency(); // only meaningful once the device is running
+    this.refreshLatency(); // only meaningful once the device is running
   }
 
   pause(): void {
@@ -159,14 +167,16 @@ export class AudioEngine {
   get noteVolume(): number { return this.noteGain?.gain.value ?? 1; }
 
   /**
-   * A short sine, purely as a pitch reference: it lives outside the player, so
-   * it never becomes part of the track's playback.
+   * A short sine, purely as a pitch reference: it lives outside the player, so it
+   * never becomes part of the track's playback. `when` is an AudioContext time;
+   * scheduling ahead is what lets a note land together with the audio it marks,
+   * since both go out through the same device buffer.
    */
-  beep(freq: number, ms = 340): void {
+  beep(freq: number, ms = 340, when?: number): void {
     const ctx = this.ctx;
     if (!ctx || !this.noteGain || !(freq > 0)) return;
     void ctx.resume();
-    const t = ctx.currentTime;
+    const t = Math.max(ctx.currentTime, when ?? 0);
     const dur = ms / 1000;
     const osc = ctx.createOscillator();
     const env = ctx.createGain();

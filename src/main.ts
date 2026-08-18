@@ -94,6 +94,8 @@ let analysis: Analysis | null = null;
 const PEAK_BUCKET = 1024;
 /** How close a right click must be to count as "on a marker", in px. */
 const MARKER_NEAR = 14;
+/** Booking margin for reference notes, in seconds of output. */
+const NOTE_LEAD = 0.03;
 
 const session: Session = loadSession();
 let trackKeyCur: string | null = null;
@@ -535,16 +537,25 @@ function soundCrossedPitches(playhead: number): void {
     notePos = playhead;
     return;
   }
-  // backward jump (loop): nothing to sound, pick up from here
-  if (playhead >= notePos) {
+
+  // A note must be *scheduled* early to be *heard* on time: the tone goes out
+  // through the same device buffer as the track, so it is booked at the audio
+  // clock time the marked sample is rendered at. Hence the lookahead — and hence
+  // an error in the latency figure cancels out, since it shifts `playhead` and
+  // `when` by the same amount in opposite directions.
+  const rate = Math.max(0.01, engine.rate);
+  const lat = engine.latency;
+  const horizon = playhead + lat * rate + NOTE_LEAD * rate;
+  if (horizon >= notePos) {
+    const now = engine.ctxTime;
     for (const p of pitches) {
-      if (p.t > notePos && p.t <= playhead) {
-        engine.beep(midiToFreq(p.midi), 260);
+      if (p.t > notePos && p.t <= horizon) {
+        engine.beep(midiToFreq(p.midi), 260, now - lat + (p.t - playhead) / rate);
         notesFired++;
       }
     }
   }
-  notePos = playhead;
+  notePos = horizon;
 }
 
 // ---------------------------------------------------------------- controls ---
@@ -1038,6 +1049,10 @@ setInterval(() => {
   // keep the shared copy fresh: a new tab starts from it
   promoteSession(session);
 }, 2000);
+
+// the device latency settles after playback starts, and changes with the output
+// device: without refreshing it the playhead would sit wherever it was first read
+setInterval(() => { if (engine.playing) engine.refreshLatency(); }, 1000);
 
 // on the way out the tab promotes its own state: it becomes the starting point
 // for the next tab, without stepping on the ones already open
