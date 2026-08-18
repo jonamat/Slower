@@ -190,6 +190,17 @@
         </div>
 
         <div class="frow">
+          <label class="tip" data-tip="The stretch algorithm used under 100% speed" for="algo">Stretch mode</label>
+          <select id="algo">
+            <option value="signalsmith" selected>Signalsmith</option>
+            <option value="wsola">WSOLA</option>
+            <option value="pv">Phase vocoder</option>
+            <option value="smear">Smear</option>
+          </select>
+          <span class="val"></span>
+        </div>
+
+        <div class="frow">
           <label class="tip" data-tip="Nudge the image against the audio. Latency is already compensated, so 0 is usually right" for="specOffset">Spectrum offset</label>
           <input type="number" id="specOffset" min="-250" max="250" step="1" value="0" />
           <span class="val dim">ms</span>

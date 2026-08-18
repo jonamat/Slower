@@ -22,6 +22,8 @@ export interface Settings {
   specOffsetMs: number;
   /** Key used to name pinned notes: 'chromatic', or for instance 'A:min'. */
   scale: string;
+  /** Stretch engine: 'signalsmith' | 'wsola' | 'pv' | 'smear'. */
+  algo: string;
 }
 
 export interface Marker {
@@ -61,7 +63,7 @@ export interface Session {
 
 export const DEFAULTS: Settings = {
   fft: 2048, cmap: 'magma', log: false, gain: 12, range: 70, rate: 1, mix: 0, follow: true,
-  playMode: 'track', specOffsetMs: 0, scale: 'chromatic',
+  playMode: 'track', specOffsetMs: 0, scale: 'chromatic', algo: 'signalsmith',
 };
 
 const LS_KEY = 'spectroscribe.session.v1';
@@ -153,7 +155,7 @@ function trim(tracks: Record<string, TrackState>): Record<string, TrackState> {
 // ------------------------------------------------------------- IndexedDB ----
 
 const DB_NAME = 'spectroscribe';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const FILES = 'files';
 const SPECTRA = 'spectra';
 const PEAKS = 'peaks';

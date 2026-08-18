@@ -18,6 +18,60 @@ Slower! is a browser-based audio practice tool and a Transcribe! alternative for
 - Session memory for re-opening the last state of a track
 - Export/import of track state in a single `.tsa` archive
 
+## Stretch algorithms
+
+Slowing music down is where these tools live or die, so the player is selectable
+in the Menu. Four of them, with genuinely different characters:
+
+- **Signalsmith** (default) — the [Signalsmith Stretch](https://signalsmith-audio.co.uk/code/stretch/)
+  library, MIT, running as WASM. Purpose-built for this job and the one that holds
+  up furthest down: no roughness and attacks still intact.
+- **WSOLA** — waveform-similarity overlap-add, in-house: copies pieces of the
+  waveform and splices them where they match. Attacks stay sharp, sustained notes
+  get rough as the rate drops.
+- **Phase vocoder** — in-house, phases locked to the spectral peaks: never rough
+  however far down you go, at the cost of softer attacks.
+- **Smear** — the PaulStretch idea, in-house: long window, phase of every bin
+  randomised. Measurably the noisiest of the four and no transients survive, but
+  the pitches stay legible at 20% and nothing ever sounds gritty.
+
+`node scripts/stretch-quality.mjs 0.3` renders each one offline at 30% and
+measures it:
+
+| player | chord | one instrument | pre-echo | hits | cost |
+|---|---|---|---|---|---|
+| Signalsmith | 0.2% | 0.5% | 18%* | 2 | 237 ms |
+| WSOLA | 18.3% | 0% | 0.2% | 2 | 167 ms |
+| Phase vocoder | 0% | 0% | 5.5% | 5 | 280 ms |
+| Smear | 59.1% | 52.3% | 55.5% | 7 | 239 ms |
+
+*chord* and *one instrument* are the share of output energy that is not on a
+partial of the input — roughness and warble land there. *pre-echo* is how much of
+an attack leaks out before it happens, *hits* how many times a single hit comes
+out. *cost* is wall time to render 3 s. \* the pre-echo figure is not comparable
+for Signalsmith: it aligns its output differently, so the window the metric looks
+at does not mean the same thing.
+
+The live suite (`scripts/smoke.mjs`) also checks that each player really slows
+down by the rate it was asked for, loop after loop — the metric that catches a
+stretcher quietly running at the wrong speed.
+
+Two more were tried and dropped: period-locked splices (PSOLA) measured well but
+were indistinguishable from WSOLA by ear, and a transient-aware vocoder that
+played attacks at 1x made the speed lurch between full and a standstill.
+
+### The vendored library
+
+`public/vendor/SignalsmithStretch.mjs` is a byte-for-byte copy of the npm
+package, refreshed with `node scripts/vendor.mjs`, and it is loaded at runtime
+rather than imported. That is deliberate: the library builds its own AudioWorklet
+by stringifying its own functions, so a bundler that renames identifiers produces
+a worklet that never starts.
+
+Rubber Band would be the other strong candidate but it is GPL, which an MIT app
+cannot ship; the `paulstretch` npm package processes whole files offline, so it
+cannot follow a speed slider.
+
 ## Shortcuts
 
 - `Space` - play / pause
@@ -32,3 +86,6 @@ Slower! is a browser-based audio practice tool and a Transcribe! alternative for
 ## License
 
 MIT - see [LICENSE](LICENSE). Source: [github.com/jonamat/Slower](https://github.com/jonamat/Slower)
+
+Third-party: [Signalsmith Stretch](https://www.npmjs.com/package/signalsmith-stretch)
+(MIT), vendored in `public/vendor`.

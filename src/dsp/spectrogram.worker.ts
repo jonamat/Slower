@@ -53,7 +53,8 @@ const LOG10 = 1 / Math.LN10;
 const invFloor = 255 / -DB_FLOOR;
 
 self.onmessage = (ev: MessageEvent<TileRequest>) => {
-  const { job, col0, width, hop, fftSize, mono } = ev.data;
+  const req = ev.data;
+  const { job, col0, width, hop, fftSize, mono } = req;
   const t0 = performance.now();
   prepare(fftSize);
   const bins = fftSize >> 1;

@@ -94,6 +94,14 @@ console.log('ctrl+wheel:', `t0 ${before.t0.toFixed(3)} → ${after.t0.toFixed(3)
   `span invariato=${Math.abs(after.tSpan - before.tSpan) < 1e-6}`);
 const scrolled = after.t0 > before.t0 && Math.abs(after.tSpan - before.tSpan) < 1e-6;
 
+// the checks below read exact positions, so they run on the in-house player: the
+// WASM one reports its own compensated time and would blur them by a few ms
+await page.evaluate(() => {
+  document.getElementById('algo').value = 'wsola';
+  document.getElementById('algo').dispatchEvent(new Event('change'));
+});
+await page.waitForTimeout(200);
+
 // loop 1s..3s at 60%: play from a stop jumps to the selection start, then the
 // cursor stays inside and wraps. Play icon → pause.
 await page.evaluate(() => {
@@ -307,6 +315,49 @@ const playModeOk = onlyTrack.fired === 0 && onlyTrack.track === 1
   && onlyNotes.fired >= 2 && onlyNotes.track === 0;
 await page.selectOption('#playMode', 'track');
 
+// every engine must really play at the rate it was asked for, loop after loop:
+// a stretcher that spends its time in transient passthrough stops slowing down
+await page.evaluate(() => { window.__scribe.engine.pause(); });
+await page.fill('#rate', '30');
+await page.dispatchEvent('#rate', 'input');
+const rates = [];
+for (const algo of ['signalsmith', 'wsola', 'pv', 'smear']) {
+  await page.evaluate((a) => {
+    const s = window.__scribe;
+    s.engine.pause();
+    document.getElementById('algo').value = a;
+    document.getElementById('algo').dispatchEvent(new Event('change'));
+    s.setLoopRange(1.0, 1.8);
+    s.engine.seek(1.0);
+  }, algo);
+  await page.click('#play');
+  const t0 = Date.now();
+  let wraps = 0, prev = 1.0, travelled = 0;
+  for (let i = 0; i < 60; i++) {
+    await page.waitForTimeout(100);
+    const p = await page.evaluate(() => window.__scribe.engine.position);
+    travelled += p < prev - 0.2 ? (1.8 - prev) + (p - 1.0) : p - prev;
+    if (p < prev - 0.2) wraps++;
+    prev = p;
+  }
+  const secs = (Date.now() - t0) / 1000;
+  await page.evaluate(() => window.__scribe.engine.pause());
+  rates.push({ algo, got: +(travelled / secs).toFixed(2), wraps });
+}
+console.log('velocità reale al 30%:', rates.map((r) => `${r.algo} x${r.got} (${r.wraps} giri)`).join(' · '));
+const ratesOk = rates.every((r) => Math.abs(r.got - 0.3) < 0.08 && r.wraps >= 1);
+
+
+// restore a plain state for what follows
+await page.evaluate(() => {
+  const s = window.__scribe;
+  s.engine.pause();
+  document.getElementById('algo').value = 'signalsmith';
+  document.getElementById('algo').dispatchEvent(new Event('change'));
+});
+await page.fill('#rate', '100');
+await page.dispatchEvent('#rate', 'input');
+
 // side menu: FFT size and logarithmic frequency scale
 console.log('scala di default:', (await page.evaluate(() => window.__scribe.view.log)) ? 'log' : 'lineare');
 await page.click('#setBtn');
@@ -411,7 +462,7 @@ await browser.close();
 stopServer();
 const flags = {
   errors: !errors.length, inside, spansLoop, wrapped, scrolled, memoryOk, markersOk, cacheOk, playModeOk,
-  spaceOk, offsetOk, menuOpen, menuClosed, welcomeShown, welcomeSticks, leadOk,
+  spaceOk, offsetOk, menuOpen, menuClosed, welcomeShown, welcomeSticks, leadOk, ratesOk,
   playFromOutside: Math.abs(atStart - 1) < 0.25,
   iconStopped: iconStopped === 'play', iconPlaying: iconPlaying === 'pausa',
   rate: rateShown === '60%', cursorOn, spinnerSeen, spinnerHidden,

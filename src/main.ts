@@ -33,6 +33,7 @@ const el = {
   range: $<HTMLInputElement>('range'),
   rangeVal: $('rangeVal'),
   specOffset: $<HTMLInputElement>('specOffset'),
+  algo: $<HTMLSelectElement>('algo'),
   fft: $<HTMLSelectElement>('fft'),
   cmap: $<HTMLSelectElement>('cmap'),
   mix: $<HTMLInputElement>('mix'),
@@ -194,6 +195,7 @@ async function loadFile(file: File, opts: LoadOpts = {}): Promise<void> {
     engine.setRate(rateValue());
     engine.setMix(Number(el.mix.value));
     engine.setTrackAudible(el.playMode.value !== 'notes');
+    engine.setAlgorithm(el.algo.value);
     const raw = await file.arrayBuffer();
     const buf = await engine.ctx!.decodeAudioData(raw);
     const nch = Math.min(2, buf.numberOfChannels);
@@ -278,7 +280,7 @@ function persist(now = false): void {
     fft: Number(el.fft.value), cmap: el.cmap.value, log: view.log,
     gain: view.gain, range: view.range, rate: rateValue(),
     mix: Number(el.mix.value), follow, playMode: el.playMode.value,
-    specOffsetMs: Number(el.specOffset.value), scale: el.scale.value,
+    specOffsetMs: Number(el.specOffset.value), scale: el.scale.value, algo: el.algo.value,
   };
   if (now) saveSession(session);
   else stateDirty = true;
@@ -291,6 +293,7 @@ function applySettings(s: Settings): void {
   el.range.value = String(s.range);
   el.playMode.value = s.playMode;
   el.scale.value = s.scale;
+  el.algo.value = s.algo;
   setMix(s.mix, true);
   view.gain = s.gain;
   view.range = s.range;
@@ -633,6 +636,12 @@ async function exportArchive(): Promise<void> {
 el.play.addEventListener('click', () => togglePlay());
 engine.onEnd = () => setPlayIcon();
 engine.onPos = soundCrossedPitches;
+engine.onSmithError = (why) => {
+  msg(`Signalsmith unavailable (${why}) — using the phase vocoder`);
+  el.algo.value = 'pv';
+  engine.setAlgorithm('pv');
+  stateDirty = true;
+};
 
 /**
  * Starting from a stop with the cursor outside the selection jumps to its
@@ -699,6 +708,11 @@ el.range.addEventListener('input', () => {
   el.rangeVal.textContent = `${el.range.value} dB`;
   glDirty = true;
 });
+el.algo.addEventListener('change', () => {
+  engine.setAlgorithm(el.algo.value);
+  stateDirty = true;
+});
+
 el.specOffset.addEventListener('input', () => setSpecOffset(Number(el.specOffset.value)));
 el.specOffset.addEventListener('change', () => setSpecOffset(Number(el.specOffset.value)));
 
