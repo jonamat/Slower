@@ -14,6 +14,7 @@ Slower! is a browser-based audio practice tool and a Transcribe! alternative for
 - Looping over any region of the track
 - Markers for musical sections or reference points
 - Pinned notes tied to time and pitch
+- Beat grid: tap two beats and it fills the track, then new notes and loop edges snap to it
 - Notes-only, track-only, or track-plus-notes playback modes
 - Session memory for re-opening the last state of a track
 - Export/import of track state in a single `.tsa` archive
@@ -71,6 +72,33 @@ a worklet that never starts.
 Rubber Band would be the other strong candidate but it is GPL, which an MIT app
 cannot ship; the `paulstretch` npm package processes whole files offline, so it
 cannot follow a speed slider.
+
+## Beat grid
+
+Open the side menu and press **Edit time grid**. A bar appears at the top left of the
+plot while the grid is being edited:
+
+1. Click the first beat.
+2. Click the next one - the spacing is measured and beats are laid across the whole track.
+3. A further click on the plot clears them and starts over.
+
+Drag a beat to tune it: the first beat carries the whole grid, any other one sets the
+spacing with the first as the anchor, so dragging the eighth beat moves the tempo by an
+eighth of the distance you dragged. **Save grid** locks it in, **Cancel** puts back the
+grid you had.
+
+*Grid division* picks how many lines fill a beat, from `1/1` (beats only) to `1/32`.
+With *Magnet notes* on, a newly pinned note and each loop edge land on the nearest line;
+notes already placed are never moved.
+
+## Measurement tools
+
+- `node scripts/smoke.mjs` - end to end run of the interface, headless
+- `node scripts/sync-check.mjs` - times a click of the track against the reference
+  note pinned on it, for every engine and a few speeds: it says whether what you
+  see is what you hear
+- `node scripts/stretch-quality.mjs [rate]` - artefacts of the four stretch engines
+- `node scripts/bench.mjs` - analysis throughput
 
 ## Shortcuts
 

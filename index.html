@@ -149,6 +149,12 @@
           <canvas id="gl"></canvas>
           <canvas id="ovl"></canvas>
           <div id="drop">Drop an audio file or a .tsa archive here</div>
+          <div id="gridBar" class="hide" role="status" aria-live="polite">
+            <span class="dot" aria-hidden="true"></span>
+            <span id="gridHint">Click the first beat</span>
+            <button class="btn tiny" id="gridSave">Save grid</button>
+            <button class="btn tiny" id="gridCancel">Cancel</button>
+          </div>
           <div id="loading" class="hide" role="status" aria-live="polite">
             <div class="spinner" aria-hidden="true"></div>
             <span id="loadingText">Loading…</span>
@@ -182,24 +188,52 @@
       <div class="menu-inner">
         <h2>Menu</h2>
 
+        <h3>Sound</h3>
         <div class="frow">
-          <label class="tip" data-tip="Track on the left, notes on the right, both full in the middle" for="mix">Mix</label>
+          <label class="tip" data-tip="Balance between the track and the pinned notes. Left lowers the track, right lowers the notes, centre leaves both at full" for="mix">Mix</label>
           <input type="range" id="mix" min="-100" max="100" step="1" value="0"
                  title="Left lowers the track, right lowers the notes (double click = centre)" />
           <span id="mixVal" class="mono val">100 / 100</span>
         </div>
 
         <div class="frow">
-          <label class="tip" data-tip="The stretch algorithm used under 100% speed" for="algo">Stretch mode</label>
+          <label class="tip" data-tip="The algorithm used to stretch the track at a speed less than 100%" for="algo">Stretching algorithm</label>
           <select id="algo">
-            <option value="signalsmith" selected>Signalsmith</option>
-            <option value="wsola">WSOLA</option>
-            <option value="pv">Phase vocoder</option>
-            <option value="smear">Smear</option>
+            <option value="signalsmith" selected>Signalsmith (best all round)</option>
+            <option value="wsola">WSOLA (faithful)</option>
+            <option value="pv">Phase vocoder (smoother, softer attacks)</option>
+            <option value="smear">Smear (for extreme slowdown)</option>
           </select>
           <span class="val"></span>
         </div>
 
+        <h3>Time grid</h3>
+        <div class="frow">
+          <label class="tip" data-tip="Click two beats on the spectrogram and the grid fills the whole track. Drag the first marker to move the grid, any other to fine-tune the spacing" for="gridEdit">Beat grid</label>
+          <button class="btn" id="gridEdit">Edit time grid</button>
+          <span class="val"></span>
+        </div>
+
+        <div class="frow">
+          <label class="tip" data-tip="How many lines fill each beat: 1/1 draws the beats alone, 1/4 adds three lines inside every beat" for="gridDiv">Division</label>
+          <select id="gridDiv">
+            <option value="1">1/1 — beats only</option>
+            <option value="2">1/2</option>
+            <option value="4" selected>1/4</option>
+            <option value="8">1/8</option>
+            <option value="16">1/16</option>
+            <option value="32">1/32</option>
+          </select>
+          <span class="val"></span>
+        </div>
+
+        <div class="frow">
+          <label class="tip" data-tip="New notes and loop edges land on the nearest grid line. Anything already placed stays exactly where it is" for="magnet">Magnet notes</label>
+          <label class="check"><input type="checkbox" id="magnet" checked /><span>Snap notes to grid</span></label>
+          <span class="val"></span>
+        </div>
+
+        <h3>Spectrogram</h3>
         <div class="frow">
           <label class="tip" data-tip="Nudge the image against the audio. Latency is already compensated, so 0 is usually right" for="specOffset">Spectrum offset</label>
           <input type="number" id="specOffset" min="-250" max="250" step="1" value="0" />
@@ -218,10 +252,10 @@
         <div class="frow">
           <label class="tip" data-tip="Small: sharper attacks. Large: sharper pitch" for="fft">FFT window</label>
           <select id="fft">
-            <option value="1024">1024 - sharper in time</option>
+            <option value="1024">1024 — sharper in time</option>
             <option value="2048" selected>2048</option>
             <option value="4096">4096</option>
-            <option value="8192">8192 - sharper in pitch</option>
+            <option value="8192">8192 — sharper in pitch</option>
           </select>
           <span class="val"></span>
         </div>
@@ -263,6 +297,8 @@
           <dt>drag · loop edge</dt><dd>move that bound</dd>
           <dt>shift · drag</dt><dd>select on the plot</dd>
           <dt>right click · plot</dt><dd>pin a note, or drop it</dd>
+          <dt>click · plot in grid edit</dt><dd>first beat, then the next · again to clear</dd>
+          <dt>drag · beat</dt><dd>first moves the grid, others set the tempo</dd>
           <dt>right click · ruler</dt><dd>add a marker, or drop it</dd>
           <dt>ctrl · click flag</dt><dd>drop that marker</dd>
           <dt>drag · overview</dt><dd>move the view · shift selects</dd>

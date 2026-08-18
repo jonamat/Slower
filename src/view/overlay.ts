@@ -1,7 +1,7 @@
 import {
   LANE_H, RULER_H, TOP, fmtHz, fmtTime, freqToFrac, midiToFreq, noteName, timeStep,
 } from './scales';
-import type { Marker, PitchMark } from '../store';
+import type { Marker, PitchMark, TimeGrid } from '../store';
 import { degreeName } from './scales-music';
 import type { SpecView } from './spectro-gl';
 
@@ -14,6 +14,10 @@ export interface OverlayState {
   hasLoop: boolean;
   markers: Marker[];
   pitches: PitchMark[];
+  /** Beat grid, when the track has one. */
+  grid: TimeGrid | null;
+  /** Beat being dragged while the grid is edited, or -1. */
+  gridHover: number;
   /** Chosen key: 'chromatic', or for instance 'A:min'. */
   scale: string;
   hover: { x: number; y: number } | null;
@@ -31,6 +35,7 @@ export const PITCH_HIT = 14;
 const C_ACC = '#4aa3ff';
 const C_MARK = '#31e0a5';
 const C_PITCH = '#ffffff';
+const C_BEAT = '#ffb020';
 const C_PITCH_INK = '#0a0d12';
 const C_LINE = 'rgba(255,255,255,.11)';
 const C_TEXT = '#aab4c3';
@@ -74,15 +79,27 @@ export function drawOverlay(cv: HTMLCanvasElement, s: OverlayState): void {
     }
   }
 
-  // ---- time grid ----
+  // ---- time grid: the beat grid replaces the clock one once it exists ----
   const step = timeStep(view.tSpan, w);
   const k0 = Math.ceil(view.t0 / step);
   const k1 = Math.floor((view.t0 + view.tSpan) / step);
   ctx.strokeStyle = C_LINE;
   ctx.beginPath();
-  for (let k = k0; k <= k1; k++) {
-    const x = Math.round(xOf(k * step)) + 0.5;
-    ctx.moveTo(x, TOP); ctx.lineTo(x, h);
+  if (s.grid && s.grid.beat > 0) {
+    const sub = s.grid.beat / Math.max(1, s.grid.div);
+    if ((sub / view.tSpan) * w >= 4) {          // hide it when it turns into mush
+      const j0 = Math.ceil((view.t0 - s.grid.offset) / sub);
+      const j1 = Math.floor((view.t0 + view.tSpan - s.grid.offset) / sub);
+      for (let j = j0; j <= j1; j++) {
+        const x = Math.round(xOf(s.grid.offset + j * sub)) + 0.5;
+        ctx.moveTo(x, TOP); ctx.lineTo(x, h);
+      }
+    }
+  } else {
+    for (let k = k0; k <= k1; k++) {
+      const x = Math.round(xOf(k * step)) + 0.5;
+      ctx.moveTo(x, TOP); ctx.lineTo(x, h);
+    }
   }
   ctx.stroke();
 
@@ -146,6 +163,23 @@ export function drawOverlay(cv: HTMLCanvasElement, s: OverlayState): void {
     ctx.textAlign = 'center';
     ctx.fillText('select to loop, right click to mark/unmark', w / 2, RULER_H + LANE_H / 2);
     ctx.textAlign = 'left';
+  }
+
+  // ---- beats: plain full-height lines, told apart by contrast, not by size ----
+  // with no spacing yet only the first beat exists, and it is drawn all the same:
+  // laying the grid down needs to be visible from the very first click
+  if (s.grid) {
+    const beat = s.grid.beat;
+    const i0 = beat > 0 ? Math.ceil((view.t0 - s.grid.offset) / beat) : 0;
+    const i1 = beat > 0 ? Math.floor((view.t0 + view.tSpan - s.grid.offset) / beat) : 0;
+    ctx.lineWidth = 1;
+    for (let i = i0; i <= i1; i++) {
+      const x = Math.round(xOf(s.grid.offset + i * beat)) + 0.5;
+      ctx.strokeStyle = i === s.gridHover ? '#ffffff' : C_BEAT;
+      ctx.beginPath();
+      ctx.moveTo(x, RULER_H); ctx.lineTo(x, h);
+      ctx.stroke();
+    }
   }
 
   // ---- pinned notes: one point in the spectrum, pitch and instant together ----

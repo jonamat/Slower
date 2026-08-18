@@ -4,7 +4,8 @@ import type { SpecMessage, TileRequest } from './dsp/spectrogram.worker';
 import {
   DEFAULTS, getFile, getPeaks, getSpectrum, loadSession, markWelcomeSeen, promoteSession,
   putFile, putPeaks, putSpectrum, saveSession, spectrumKey, trackKey, welcomeSeen,
-  type Marker, type PitchMark, type Session, type Settings, type SpectrumTile, type TrackState,
+  type Marker, type PitchMark, type Session, type Settings, type SpectrumTile, type TimeGrid,
+  type TrackState,
 } from './store';
 import { archiveName, buildArchive, isArchiveName, readArchive } from './archive';
 import type { CmapName } from './view/colormap';
@@ -34,6 +35,13 @@ const el = {
   rangeVal: $('rangeVal'),
   specOffset: $<HTMLInputElement>('specOffset'),
   algo: $<HTMLSelectElement>('algo'),
+  gridEdit: $<HTMLButtonElement>('gridEdit'),
+  gridDiv: $<HTMLSelectElement>('gridDiv'),
+  magnet: $<HTMLInputElement>('magnet'),
+  gridBar: $('gridBar'),
+  gridHint: $('gridHint'),
+  gridSave: $<HTMLButtonElement>('gridSave'),
+  gridCancel: $<HTMLButtonElement>('gridCancel'),
   fft: $<HTMLSelectElement>('fft'),
   cmap: $<HTMLSelectElement>('cmap'),
   mix: $<HTMLInputElement>('mix'),
@@ -77,6 +85,12 @@ let notesFired = 0; // counter, used by the test
 let follow = true;
 let hover: { x: number; y: number } | null = null;
 
+let grid: TimeGrid | null = null;
+let gridEditing = false;
+let gridStage = 0;              // 0 nothing, 1 first beat placed, 2 grid filled
+let gridHover = -1;             // beat under the pointer while editing
+let gridWas: TimeGrid | null = null;  // to put back if the edit is cancelled
+
 let glDirty = true;
 let uiDirty = true;
 
@@ -118,6 +132,27 @@ const freqAt = (y: number) => fracToFreq(
   Math.min(1, Math.max(0, (el.plot.clientHeight - y) / Math.max(1, plotH()))),
   view.fMin, view.fMax, view.log,
 );
+
+/** Distance between two grid lines, in seconds, or 0 without a grid. */
+function gridStep(): number {
+  return grid && grid.beat > 0 ? grid.beat / Math.max(1, grid.div) : 0;
+}
+
+/** Nearest grid line, when the magnet is on. Anything already placed is left alone. */
+function snap(t: number): number {
+  const step = gridStep();
+  if (!step || !el.magnet.checked || !grid) return t;
+  return grid.offset + Math.round((t - grid.offset) / step) * step;
+}
+
+/** Beat index under x, within a few pixels, or -1. */
+function beatAt(x: number): number {
+  if (!grid) return -1;
+  // before the spacing is set there is just the first beat, already grabbable
+  if (grid.beat <= 0) return Math.abs(xOfTime(grid.offset) - x) <= 6 ? 0 : -1;
+  const i = Math.round((timeAt(x) - grid.offset) / grid.beat);
+  return Math.abs(xOfTime(grid.offset + i * grid.beat) - x) <= 6 ? i : -1;
+}
 
 function clampTime(): void {
   const total = Math.max(duration, 0.05);
@@ -238,6 +273,9 @@ async function loadFile(file: File, opts: LoadOpts = {}): Promise<void> {
       clampTime();
       loopA = r.loopA; loopB = r.loopB; hasLoop = r.hasLoop;
       markers = r.markers ?? [];
+      grid = r.grid ?? null;
+      gridStage = grid ? 2 : 0;
+      if (grid) el.gridDiv.value = String(grid.div);
       // pinned notes were bare pitches in an earlier version: drop those
       pitches = (r.pitches ?? []).filter((p) => p && typeof p === 'object' && 't' in p);
       engine.seek(r.pos);
@@ -248,6 +286,8 @@ async function loadFile(file: File, opts: LoadOpts = {}): Promise<void> {
       view.fMax = Math.min(8000, nyquist);
       hasLoop = false; loopA = loopB = 0;
       markers = [];
+      grid = null;
+      gridStage = 0;
       pitches = [];
     }
     applyLoop();
@@ -271,7 +311,7 @@ async function loadFile(file: File, opts: LoadOpts = {}): Promise<void> {
 function persist(now = false): void {
   if (trackKeyCur) {
     session.tracks[trackKeyCur] = {
-      pos: engine.position, loopA, loopB, hasLoop, markers, pitches,
+      pos: engine.position, loopA, loopB, hasLoop, markers, pitches, grid,
       t0: view.t0, tSpan: view.tSpan, fMin: view.fMin, fMax: view.fMax,
       at: Date.now(),
     };
@@ -281,6 +321,7 @@ function persist(now = false): void {
     gain: view.gain, range: view.range, rate: rateValue(),
     mix: Number(el.mix.value), follow, playMode: el.playMode.value,
     specOffsetMs: Number(el.specOffset.value), scale: el.scale.value, algo: el.algo.value,
+    magnet: el.magnet.checked,
   };
   if (now) saveSession(session);
   else stateDirty = true;
@@ -294,6 +335,7 @@ function applySettings(s: Settings): void {
   el.playMode.value = s.playMode;
   el.scale.value = s.scale;
   el.algo.value = s.algo;
+  el.magnet.checked = s.magnet;
   setMix(s.mix, true);
   view.gain = s.gain;
   view.range = s.range;
@@ -441,8 +483,8 @@ function applyLoop(): void {
 }
 
 function setLoopRange(a: number, b: number): void {
-  loopA = Math.max(0, Math.min(a, duration));
-  loopB = Math.max(0, Math.min(b, duration));
+  loopA = Math.max(0, Math.min(snap(a), duration));
+  loopB = Math.max(0, Math.min(snap(b), duration));
   hasLoop = Math.abs(loopB - loopA) > 0.02;
   applyLoop();
 }
@@ -452,6 +494,86 @@ function clearLoop(): void {
   loopA = loopB = 0;
   applyLoop();
 }
+
+// --------------------------------------------------------------- time grid ---
+
+const GRID_HINTS = [
+  'Click the first beat',
+  'Click the next beat',
+  'Grid set — drag a beat to tune it, click the plot to clear',
+];
+
+function showGridHint(): void {
+  el.gridHint.textContent = GRID_HINTS[gridStage];
+  el.gridEdit.classList.toggle('on', gridEditing);
+  el.gridBar.classList.toggle('hide', !gridEditing);
+}
+
+function enterGridEdit(): void {
+  if (!duration) return;
+  gridEditing = true;
+  gridWas = grid ? { ...grid } : null;
+  gridStage = grid && grid.beat > 0 ? 2 : 0;
+  showGridHint();
+  uiDirty = true;
+}
+
+function exitGridEdit(keep: boolean): void {
+  gridEditing = false;
+  if (keep) {
+    if (gridStage < 2) grid = null;      // half a grid is not a grid
+  } else {
+    grid = gridWas ? { ...gridWas } : null;
+  }
+  gridStage = grid ? 2 : 0;
+  gridHover = -1;
+  showGridHint();
+  stateDirty = true;
+  uiDirty = true;
+}
+
+/** The click cycle: first beat, second beat fills the track, third clears it. */
+function gridClick(t: number): void {
+  const div = Number(el.gridDiv.value);
+  if (gridStage === 0) {
+    grid = { offset: t, beat: 0, div };
+    gridStage = 1;
+  } else if (gridStage === 1 && grid) {
+    const beat = Math.abs(t - grid.offset);
+    if (beat < 0.02) return;             // two clicks on the same spot mean nothing
+    grid = { offset: Math.min(grid.offset, t), beat, div };
+    gridStage = 2;
+  } else {
+    grid = null;
+    gridStage = 0;
+  }
+  showGridHint();
+  stateDirty = true;
+  uiDirty = true;
+}
+
+/**
+ * Micro-tuning: the first beat carries the whole grid, any other one sets the
+ * spacing with the first beat as the anchor — drag the eighth beat and the tempo
+ * moves by an eighth of what you dragged.
+ */
+function gridDragTo(index: number, t: number): void {
+  if (!grid) return;
+  if (index === 0) grid = { ...grid, offset: t };
+  else grid = { ...grid, beat: Math.max(0.05, (t - grid.offset) / index) };
+  uiDirty = true;
+  stateDirty = true;
+}
+
+el.gridEdit.addEventListener('click', () => (gridEditing ? exitGridEdit(true) : enterGridEdit()));
+el.gridSave.addEventListener('click', () => exitGridEdit(true));
+el.gridCancel.addEventListener('click', () => exitGridEdit(false));
+el.gridDiv.addEventListener('change', () => {
+  if (grid) grid = { ...grid, div: Number(el.gridDiv.value) };
+  uiDirty = true;
+  stateDirty = true;
+});
+el.magnet.addEventListener('change', () => { stateDirty = true; });
 
 // ----------------------------------------------------------------- markers ---
 
@@ -511,7 +633,7 @@ function addPitch(t: number, freq: number): void {
   if (!duration || !(freq > 0)) return;
   const midi = Math.round(69 + 12 * Math.log2(freq / 440));
   if (midi < 12 || midi > 127) return;
-  pitches.push({ t: Math.max(0, Math.min(t, duration)), midi });
+  pitches.push({ t: Math.max(0, Math.min(snap(t), duration)), midi });
   pitches.sort((a, b) => a.t - b.t);
   engine.beep(midiToFreq(midi));
   uiDirty = true;
@@ -759,9 +881,10 @@ function setMix(mix: number, silent = false): void {
 
 // ------------------------------------------------------------ plot pointer ---
 
-type Mode = 'none' | 'pan' | 'scrub' | 'loopNew' | 'loopA' | 'loopB';
+type Mode = 'none' | 'pan' | 'scrub' | 'loopNew' | 'loopA' | 'loopB' | 'gridBeat';
 let mode: Mode = 'none';
 let startX = 0, startY = 0, lastY = 0, startT0 = 0, startAnchorT = 0, moved = 0;
+let dragBeat = -1;
 
 el.ovl.addEventListener('pointerdown', (e) => {
   if (!duration || e.button !== 0) return; // the right button belongs to the markers
@@ -778,6 +901,11 @@ el.ovl.addEventListener('pointerdown', (e) => {
     }
     mode = 'scrub';
     engine.seek(timeAt(x));
+  } else if (gridEditing && y >= TOP) {
+    // while the grid is being edited the plot belongs to it: a beat under the
+    // pointer is dragged, anywhere else the click lands on pointerup
+    dragBeat = beatAt(x);
+    mode = 'gridBeat';
   } else if (nearHandle(x, y)) {
     mode = nearHandle(x, y)!; // selection edge: grabbable from the lane and the plot
   } else if (y < TOP) {
@@ -813,8 +941,14 @@ el.ovl.addEventListener('pointermove', (e) => {
       : fmtTime(timeAt(x));
   }
   if (mode === 'none') {
-    // over a selection edge the pointer says it can be moved
-    el.ovl.style.cursor = nearHandle(x, y) ? 'ew-resize' : 'crosshair';
+    // over a selection edge, or over a beat while the grid is edited, the pointer
+    // says it can be dragged sideways
+    const editingHere = gridEditing && y >= TOP;
+    const onBeat = editingHere ? beatAt(x) : -1;
+    if (onBeat !== gridHover) { gridHover = onBeat; uiDirty = true; }
+    // the selection is not grabbable while the grid is edited: don't offer it
+    const grabbable = editingHere ? onBeat >= 0 : nearHandle(x, y) !== null;
+    el.ovl.style.cursor = grabbable ? 'ew-resize' : 'crosshair';
     return;
   }
   moved = Math.max(moved, Math.abs(x - startX) + Math.abs(y - startY));
@@ -830,6 +964,9 @@ el.ovl.addEventListener('pointermove', (e) => {
     }
     case 'scrub':
       engine.seek(timeAt(x));
+      break;
+    case 'gridBeat':
+      if (dragBeat >= 0) gridDragTo(dragBeat, timeAt(x));
       break;
     case 'loopNew':
       setLoopRange(startAnchorT, timeAt(x));
@@ -848,7 +985,8 @@ el.ovl.addEventListener('pointermove', (e) => {
 el.ovl.addEventListener('pointerup', (e) => {
   const r = el.ovl.getBoundingClientRect();
   const x = e.clientX - r.left;
-  if (mode === 'pan' && moved < 4) engine.seek(timeAt(x));
+  if (mode === 'gridBeat' && dragBeat < 0 && moved < 4) gridClick(timeAt(x));
+  else if (mode === 'pan' && moved < 4) engine.seek(timeAt(x));
   if (mode === 'loopNew' && moved < 4) clearLoop();
   mode = 'none';
   uiDirty = true;
@@ -932,6 +1070,7 @@ el.overview.addEventListener('pointerup', () => { ovMode = 'none'; });
 
 window.addEventListener('keydown', (e) => {
   if (el.welcome.open) return; // the welcome card closes with its button or Esc
+  if (gridEditing && e.key === 'Escape') { exitGridEdit(false); return; }
   if (menuOpen && e.key === 'Escape') { toggleMenu(false); return; }
   // space is always play/pause, even with focus on a select or a button
   if (e.key === ' ') {
@@ -1024,7 +1163,7 @@ function frame(): void {
   }
   drawOverlay(el.ovl, {
     view, duration, playhead,
-    loopA: Math.min(loopA, loopB), loopB: Math.max(loopA, loopB), hasLoop, markers, pitches, scale: el.scale.value, hover,
+    loopA: Math.min(loopA, loopB), loopB: Math.max(loopA, loopB), hasLoop, markers, pitches, scale: el.scale.value, grid, gridHover, hover,
   });
   drawOverview(el.overview, peaks, {
     duration, view, playhead, loopA: Math.min(loopA, loopB), loopB: Math.max(loopA, loopB),
@@ -1041,12 +1180,14 @@ function msg(text: string): void { el.stMsg.textContent = text; }
 
 // small handle for debugging / automated smoke tests
 (window as unknown as Record<string, unknown>).__scribe = {
-  engine, view, spectro, setLoopRange, addMarker, addPitch, persist,
+  engine, view, spectro, setLoopRange, addMarker, addPitch, removePitch, persist,
+  setGrid(g: TimeGrid | null) { grid = g; gridStage = g ? 2 : 0; uiDirty = true; },
   get state() {
     return {
       duration, hasLoop, loopA, loopB, markers, pitches, trackName,
-      trackKey: trackKeyCur, restored, playing: engine.playing, ready: lastReady,
+      trackKey: trackKeyCur, restored, playing: engine.playing, ready: lastReady, grid, gridEditing,
       notesFired, notePos, playMode: el.playMode.value, trackVolume: engine.trackVolume,
+      mode, dragBeat, gridHover,
     };
   },
 };

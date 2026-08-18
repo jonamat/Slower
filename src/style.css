@@ -161,6 +161,30 @@ input[type=range] { width: 86px; height: 20px; padding: 0; accent-color: var(--a
 .fnote code { font-family: ui-monospace, monospace; color: var(--fg); }
 .btn.wide { width: 100%; }
 
+/* grid edit banner, top left of the plot */
+#gridBar {
+  position: absolute; top: 10px; left: 10px; z-index: 3;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--acc);
+  border-radius: 1px;
+  background: rgba(10, 14, 20, .94);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .5);
+  font-size: 12px;
+}
+#gridBar.hide { display: none; }
+#gridBar .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--acc);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { #gridBar .dot { animation: none; } }
+#gridHint { color: var(--fg); }
+
+.check { display: flex; align-items: center; gap: 7px; color: var(--dim); cursor: pointer; }
+.check input { accent-color: var(--acc); width: 14px; height: 14px; }
+
 /* text for crawlers and screen readers, out of the visual layout */
 .sr-only {
   position: absolute;

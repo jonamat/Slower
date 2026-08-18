@@ -24,6 +24,8 @@ export interface Settings {
   scale: string;
   /** Stretch engine: 'signalsmith' | 'wsola' | 'pv' | 'smear'. */
   algo: string;
+  /** Snap newly placed notes and loop edges to the beat grid. */
+  magnet: boolean;
 }
 
 export interface Marker {
@@ -31,6 +33,16 @@ export interface Marker {
   t: number;
   /** Reference letter assigned on creation. */
   label: string;
+}
+
+/**
+ * Beat grid laid over the track: where the first beat sits, how long a beat is,
+ * and how many lines fill each beat.
+ */
+export interface TimeGrid {
+  offset: number;
+  beat: number;
+  div: number;
 }
 
 /** A note pinned at one spot of the spectrum: when, and at which pitch. */
@@ -48,6 +60,8 @@ export interface TrackState {
   markers: Marker[];
   /** Pinned reference notes, each at a precise instant. */
   pitches: PitchMark[];
+  /** Beat grid, once the user has set one. */
+  grid: TimeGrid | null;
   t0: number;
   tSpan: number;
   fMin: number;
@@ -63,7 +77,7 @@ export interface Session {
 
 export const DEFAULTS: Settings = {
   fft: 2048, cmap: 'magma', log: false, gain: 12, range: 70, rate: 1, mix: 0, follow: true,
-  playMode: 'track', specOffsetMs: 0, scale: 'chromatic', algo: 'signalsmith',
+  playMode: 'track', specOffsetMs: 0, scale: 'chromatic', algo: 'signalsmith', magnet: true,
 };
 
 const LS_KEY = 'spectroscribe.session.v1';
