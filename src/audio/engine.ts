@@ -26,6 +26,25 @@ export class AudioEngine {
   private smith: StretchNode | null = null;
   private smithBuffered = false;
   private smithInit: Promise<boolean> | null = null;
+  /**
+   * The library's own latency, in seconds of output. It reports the input time it
+   * is *feeding*, which comes out of the node this much later, so the figure has
+   * to come off the playhead.
+   */
+  private smithLatency = 0;
+  /**
+   * Position just asked for, while the audio that carries it is still on its way
+   * out. Until then the reported time is behind it, which is honest but would send
+   * the cursor to the far end of a selection, so it is held here instead.
+   */
+  private smithFrom = -1;
+  /**
+   * Depth of a schedule() call in flight. The library answers every schedule with a
+   * time message computed from the mapping it is *replacing*, so while paused it
+   * echoes the frozen position and after a seek the old one: taking those would
+   * drag the playhead back, and the next play() would start from there.
+   */
+  private smithEcho = 0;
   /** Kept on the main thread so either player can be fed without decoding again. */
   private channels: Float32Array[] | null = null;
   private algo = 'wsola';
@@ -130,9 +149,13 @@ export class AudioEngine {
         // the node goes into live-input mode and outputs silence forever
         const node = await SignalsmithStretch(ctx);
         await node.configure({ blockMs: 120 });   // long block: better at low rates
+        this.smithLatency = (await node.latency()) || 0;
         node.setUpdateInterval(0.011, (t) => {
-          if (!this.usesSmith) return;
-          this.posSamples = t * this.sampleRate;
+          if (!this.usesSmith || this.smithEcho > 0) return;
+          this.posSamples = Math.max(0, (t - this.smithSkew()) * this.sampleRate);
+          if (this.smithFrom >= 0 && this.posSamples / this.sampleRate >= this.smithFrom) {
+            this.smithFrom = -1;
+          }
           this.onPos?.(this.position);
         });
         this.smith = node;
@@ -170,7 +193,7 @@ export class AudioEngine {
       this.smith!.connect(this.trackGain);
     } else {
       if (this.smith) {
-        void this.smith.schedule({ active: false, output: this.ctx.currentTime });
+        this.smithSchedule({ active: false, output: this.ctx.currentTime });
         this.smith.disconnect();
       }
       this.node?.connect(this.trackGain);
@@ -182,16 +205,41 @@ export class AudioEngine {
     if (wasPlaying) void this.play();
   }
 
+  /** Schedules on the WASM player, swallowing the time message it echoes back. */
+  private smithSchedule(obj: Record<string, number | boolean>): void {
+    const node = this.smith;
+    if (!node) return;
+    this.smithEcho++;
+    void Promise.resolve(node.schedule(obj)).catch(() => { /* node gone */ })
+      .finally(() => { this.smithEcho--; });
+  }
+
+  /**
+   * Distance, in source seconds, between the time the WASM player reports and the
+   * audio you actually hear: its own latency plus the device buffer, both in
+   * output seconds, hence scaled by the rate.
+   *
+   * Measured with scripts/sync-check.mjs, which times a click of the track against
+   * the reference note pinned on it.
+   */
+  private smithSkew(): number {
+    return (this.smithLatency + this.latency) * this.rate;
+  }
+
   /**
    * Position of what is audible right now, straight from the audio thread: the
    * worklet already accounts for its own queue and for the device buffer.
    */
   get position(): number {
     let t = Math.max(0, this.posSamples / this.sampleRate);
-    // the WASM player loops internally and reports its own compensated time, so
-    // the value can sit a few ms outside the selection: keep the cursor honest
+    if (this.usesSmith && this.smithFrom >= 0) return Math.max(t, this.smithFrom);
+    // the WASM player loops on its own, so once its report is pulled back to what
+    // is audible the value lands before the selection: that audio is the tail of
+    // the previous pass, so wrap it instead of pinning it to the bound
     if (this.usesSmith && this.loopOn && this.loopEndSec > this.loopStartSec) {
-      t = Math.min(Math.max(t, this.loopStartSec), this.loopEndSec);
+      const len = this.loopEndSec - this.loopStartSec;
+      if (t < this.loopStartSec) t = this.loopEndSec - ((this.loopStartSec - t) % len);
+      else if (t > this.loopEndSec) t = this.loopStartSec + ((t - this.loopStartSec) % len);
     }
     return t;
   }
@@ -221,9 +269,10 @@ export class AudioEngine {
     if (!this.length) return;
     this.playing = true; // set first, so the UI needn't wait for resume()
     if (this.usesSmith && this.smithReady) {
-      void this.smith?.schedule({
+      this.smithFrom = this.position;
+      this.smithSchedule({
         active: true, output: this.ctx!.currentTime + SMITH_AHEAD,
-        input: this.position, rate: this.rate,
+        input: this.smithFrom, rate: this.rate,
       });
     } else {
       this.node?.port.postMessage({ type: 'play' });
@@ -235,7 +284,7 @@ export class AudioEngine {
   pause(): void {
     this.playing = false;
     if (this.usesSmith && this.smithReady) {
-      void this.smith?.schedule({ active: false, output: this.ctx!.currentTime + SMITH_AHEAD });
+      this.smithSchedule({ active: false, output: this.ctx!.currentTime + SMITH_AHEAD });
     }
     else this.node?.port.postMessage({ type: 'pause' });
   }
@@ -247,7 +296,8 @@ export class AudioEngine {
     this.posSamples = secs * this.sampleRate;
     this.seekCount++;
     if (this.usesSmith && this.smithReady) {
-      void this.smith?.schedule({
+      this.smithFrom = secs;
+      this.smithSchedule({
         input: secs, output: this.ctx!.currentTime + SMITH_AHEAD,
         active: this.playing, rate: this.rate,
       });
@@ -266,7 +316,7 @@ export class AudioEngine {
   setRate(rate: number): void {
     this.rate = rate;
     if (this.usesSmith && this.smithReady) {
-      void this.smith?.schedule({ rate, output: this.ctx!.currentTime + SMITH_AHEAD, active: this.playing });
+      this.smithSchedule({ rate, output: this.ctx!.currentTime + SMITH_AHEAD, active: this.playing });
     } else {
       this.node?.port.postMessage({ type: 'rate', rate });
     }
@@ -278,7 +328,7 @@ export class AudioEngine {
     this.loopEndSec = endSec;
     if (this.usesSmith && this.smithReady) {
       // the library loops on its own; equal bounds turn it off
-      void this.smith?.schedule({
+      this.smithSchedule({
         loopStart: on ? startSec : 0, loopEnd: on ? endSec : 0,
         output: this.ctx!.currentTime + SMITH_AHEAD,
       });
