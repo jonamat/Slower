@@ -38,7 +38,7 @@ export function loadSignalsmith(): Promise<Factory> {
   if (!factory) {
     // resolved against the page, not against this module: with a relative base a
     // bare specifier would look for the file next to the source file instead
-    const url = new URL(`${import.meta.env.BASE_URL}vendor/SignalsmithStretch.mjs`, document.baseURI).href;
+    const url = new URL(`${import.meta.env.BASE_URL}vendor/SignalsmithStretch.js`, document.baseURI).href;
     factory = import(/* @vite-ignore */ url).then((m: { default: Factory }) => m.default);
   }
   return factory;

@@ -38,6 +38,8 @@ export class AudioEngine {
    * the cursor to the far end of a selection, so it is held here instead.
    */
   private smithFrom = -1;
+  /** Deadline for that hold, so a position never asked for cannot strand the cursor. */
+  private smithHoldUntil = 0;
   /**
    * Depth of a schedule() call in flight. The library answers every schedule with a
    * time message computed from the mapping it is *replacing*, so while paused it
@@ -205,6 +207,24 @@ export class AudioEngine {
     if (wasPlaying) void this.play();
   }
 
+  /**
+   * Where a position lands once the WASM player's own loop has had its say: past
+   * the end of the selection it wraps back into it, so a hold set there is a value
+   * the player will actually report.
+   */
+  private smithWrap(t: number): number {
+    if (!this.loopOn || this.loopEndSec <= this.loopStartSec || t <= this.loopEndSec) return t;
+    const len = this.loopEndSec - this.loopStartSec;
+    return this.loopStartSec + ((t - this.loopStartSec) % len);
+  }
+
+  /** Arms the hold on the position just asked for. */
+  private smithHold(t: number): number {
+    this.smithFrom = this.smithWrap(t);
+    this.smithHoldUntil = (this.ctx?.currentTime ?? 0) + this.smithSkew() + 0.5;
+    return this.smithFrom;
+  }
+
   /** Schedules on the WASM player, swallowing the time message it echoes back. */
   private smithSchedule(obj: Record<string, number | boolean>): void {
     const node = this.smith;
@@ -232,7 +252,10 @@ export class AudioEngine {
    */
   get position(): number {
     let t = Math.max(0, this.posSamples / this.sampleRate);
-    if (this.usesSmith && this.smithFrom >= 0) return Math.max(t, this.smithFrom);
+    if (this.usesSmith && this.smithFrom >= 0) {
+      if ((this.ctx?.currentTime ?? 0) <= this.smithHoldUntil) return Math.max(t, this.smithFrom);
+      this.smithFrom = -1;
+    }
     // the WASM player loops on its own, so once its report is pulled back to what
     // is audible the value lands before the selection: that audio is the tail of
     // the previous pass, so wrap it instead of pinning it to the bound
@@ -269,7 +292,7 @@ export class AudioEngine {
     if (!this.length) return;
     this.playing = true; // set first, so the UI needn't wait for resume()
     if (this.usesSmith && this.smithReady) {
-      this.smithFrom = this.position;
+      this.smithHold(this.position);
       this.smithSchedule({
         active: true, output: this.ctx!.currentTime + SMITH_AHEAD,
         input: this.smithFrom, rate: this.rate,
@@ -296,7 +319,7 @@ export class AudioEngine {
     this.posSamples = secs * this.sampleRate;
     this.seekCount++;
     if (this.usesSmith && this.smithReady) {
-      this.smithFrom = secs;
+      this.smithHold(secs);
       this.smithSchedule({
         input: secs, output: this.ctx!.currentTime + SMITH_AHEAD,
         active: this.playing, rate: this.rate,
