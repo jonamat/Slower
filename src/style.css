@@ -10,6 +10,7 @@
   --dim: #9dabbf;
   --acc: #4aa3ff;
   --acc2: #31e0a5;
+  --beat: #ffb020;   /* same amber as the beat lines on the plot */
   --ink: #06131f;
   color-scheme: dark;
 }
@@ -181,6 +182,13 @@ input[type=range] { width: 86px; height: 20px; padding: 0; accent-color: var(--a
 @keyframes pulse { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { #gridBar .dot { animation: none; } }
 #gridHint { color: var(--fg); }
+/* the tempo the spacing comes to: read while dragging the last beat into place */
+#gridTempo {
+  color: var(--beat);
+  font: 12px ui-monospace, monospace;
+  min-width: 118px;
+}
+#gridBar .btn.hide { display: none; }
 
 .check { display: flex; align-items: center; gap: 7px; color: var(--dim); cursor: pointer; }
 .check input { accent-color: var(--acc); width: 14px; height: 14px; }

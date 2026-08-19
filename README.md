@@ -17,7 +17,8 @@ Slower! is a browser-based audio practice tool and a Transcribe! alternative for
 - Beat grid: tap two beats and it fills the track, then new notes and loop edges snap to it
 - Notes-only, track-only, or track-plus-notes playback modes
 - Session memory for re-opening the last state of a track
-- Export/import of track state in a single `.tsa` archive
+- Export/import in a single `.tsa` archive: the audio plus cursor, selection,
+  markers, pinned notes, beat grid, view and settings
 
 ## Stretch algorithms
 
@@ -63,11 +64,16 @@ played attacks at 1x made the speed lurch between full and a standstill.
 
 ### The vendored library
 
-`public/vendor/SignalsmithStretch.mjs` is a byte-for-byte copy of the npm
-package, refreshed with `node scripts/vendor.mjs`, and it is loaded at runtime
-rather than imported. That is deliberate: the library builds its own AudioWorklet
-by stringifying its own functions, so a bundler that renames identifiers produces
-a worklet that never starts.
+`public/vendor/SignalsmithStretch.js` is a byte-for-byte copy of the npm package,
+refreshed with `node scripts/vendor.mjs`, and it is loaded at runtime rather than
+imported. That is deliberate: the library builds its own AudioWorklet by
+stringifying its own functions, so a bundler that renames identifiers produces a
+worklet that never starts.
+
+The extension is `.js`, not the upstream `.mjs`: nginx and plenty of other static
+servers have no type for `.mjs` and answer `application/octet-stream`, which the
+browser refuses as a module script. `docker/nginx.conf` also maps `.mjs` for good
+measure.
 
 Rubber Band would be the other strong candidate but it is GPL, which an MIT app
 cannot ship; the `paulstretch` npm package processes whole files offline, so it
@@ -80,12 +86,16 @@ plot while the grid is being edited:
 
 1. Click the first beat.
 2. Click the next one - the spacing is measured and beats are laid across the whole track.
-3. A further click on the plot clears them and starts over.
 
-Drag a beat to tune it: the first beat carries the whole grid, any other one sets the
-spacing with the first as the anchor, so dragging the eighth beat moves the tempo by an
-eighth of the distance you dragged. **Save grid** locks it in, **Cancel** puts back the
-grid you had.
+From then on every beat can be dragged, and that is the point: an error on the length of
+one beat piles up bar after bar, so it is on the *last* beat that it is big enough to see
+and take out. The first beat carries the whole grid; any other one sets the spacing with
+the first as the anchor, so dragging the twelfth beat moves the tempo by a twelfth of the
+distance you dragged. The bar shows the beat length and the tempo it comes to, to line the
+last beat up on a number.
+
+**Save grid** locks it in, **Clear** drops the grid and starts over, **Cancel** puts back
+the grid you had.
 
 *Grid division* picks how many lines fill a beat, from `1/1` (beats only) to `1/32`.
 With *Magnet notes* on, a newly pinned note and each loop edge land on the nearest line;
@@ -94,6 +104,8 @@ notes already placed are never moved.
 ## Measurement tools
 
 - `node scripts/smoke.mjs` - end to end run of the interface, headless
+- `node scripts/archive-check.mjs` - exports a `.tsa`, reads its header from the raw
+  bytes and imports it into a session wiped clean: state in must equal state out
 - `node scripts/sync-check.mjs` - times a click of the track against the reference
   note pinned on it, for every engine and a few speeds: it says whether what you
   see is what you hear

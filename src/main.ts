@@ -41,6 +41,8 @@ const el = {
   gridBar: $('gridBar'),
   gridHint: $('gridHint'),
   gridSave: $<HTMLButtonElement>('gridSave'),
+  gridClear: $<HTMLButtonElement>('gridClear'),
+  gridTempo: $('gridTempo'),
   gridCancel: $<HTMLButtonElement>('gridCancel'),
   fft: $<HTMLSelectElement>('fft'),
   cmap: $<HTMLSelectElement>('cmap'),
@@ -90,6 +92,7 @@ let gridEditing = false;
 let gridStage = 0;              // 0 nothing, 1 first beat placed, 2 grid filled
 let gridHover = -1;             // beat under the pointer while editing
 let gridWas: TimeGrid | null = null;  // to put back if the edit is cancelled
+let lastUserSeek = -1;          // so a drag outside a loop does not restart it per pixel
 
 let glDirty = true;
 let uiDirty = true;
@@ -145,13 +148,17 @@ function snap(t: number): number {
   return grid.offset + Math.round((t - grid.offset) / step) * step;
 }
 
-/** Beat index under x, within a few pixels, or -1. */
+/**
+ * Beat to grab at x, or -1. Once the grid is laid out every beat is grabbable,
+ * whatever the pointer is nearest to: correcting the length of the bar is the
+ * whole point of the grid, and the error to correct shows up on the *last* beat,
+ * where all the small ones have piled up. While only the first beat exists it
+ * needs a hit area instead, or the click that sets the spacing could never land.
+ */
 function beatAt(x: number): number {
   if (!grid) return -1;
-  // before the spacing is set there is just the first beat, already grabbable
-  if (grid.beat <= 0) return Math.abs(xOfTime(grid.offset) - x) <= 6 ? 0 : -1;
-  const i = Math.round((timeAt(x) - grid.offset) / grid.beat);
-  return Math.abs(xOfTime(grid.offset + i * grid.beat) - x) <= 6 ? i : -1;
+  if (grid.beat <= 0) return Math.abs(xOfTime(grid.offset) - x) <= 12 ? 0 : -1;
+  return Math.round((timeAt(x) - grid.offset) / grid.beat);
 }
 
 function clampTime(): void {
@@ -500,11 +507,16 @@ function clearLoop(): void {
 const GRID_HINTS = [
   'Click the first beat',
   'Click the next beat',
-  'Grid set — drag a beat to tune it, click the plot to clear',
+  'Drag any beat: the first moves the grid, the others set the tempo',
 ];
 
 function showGridHint(): void {
   el.gridHint.textContent = GRID_HINTS[gridStage];
+  // the tempo it comes to, so the last beat can be lined up on a number
+  el.gridTempo.textContent = grid && grid.beat > 0
+    ? `${grid.beat.toFixed(3)} s · ${(60 / grid.beat).toFixed(1)} BPM`
+    : '';
+  el.gridClear.classList.toggle('hide', gridStage < 2);
   el.gridEdit.classList.toggle('on', gridEditing);
   el.gridBar.classList.toggle('hide', !gridEditing);
 }
@@ -532,7 +544,7 @@ function exitGridEdit(keep: boolean): void {
   uiDirty = true;
 }
 
-/** The click cycle: first beat, second beat fills the track, third clears it. */
+/** Laying the grid out: the first click marks a beat, the second sets the spacing. */
 function gridClick(t: number): void {
   const div = Number(el.gridDiv.value);
   if (gridStage === 0) {
@@ -544,9 +556,18 @@ function gridClick(t: number): void {
     grid = { offset: Math.min(grid.offset, t), beat, div };
     gridStage = 2;
   } else {
-    grid = null;
-    gridStage = 0;
+    return;                              // laid out: clicks tune, they do not clear
   }
+  showGridHint();
+  stateDirty = true;
+  uiDirty = true;
+}
+
+/** Drops the grid and starts over from the first beat. */
+function gridClear(): void {
+  grid = null;
+  gridStage = 0;
+  gridHover = -1;
   showGridHint();
   stateDirty = true;
   uiDirty = true;
@@ -561,6 +582,7 @@ function gridDragTo(index: number, t: number): void {
   if (!grid) return;
   if (index === 0) grid = { ...grid, offset: t };
   else grid = { ...grid, beat: Math.max(0.05, (t - grid.offset) / index) };
+  showGridHint();
   uiDirty = true;
   stateDirty = true;
 }
@@ -568,6 +590,7 @@ function gridDragTo(index: number, t: number): void {
 el.gridEdit.addEventListener('click', () => (gridEditing ? exitGridEdit(true) : enterGridEdit()));
 el.gridSave.addEventListener('click', () => exitGridEdit(true));
 el.gridCancel.addEventListener('click', () => exitGridEdit(false));
+el.gridClear.addEventListener('click', () => gridClear());
 el.gridDiv.addEventListener('change', () => {
   if (grid) grid = { ...grid, div: Number(el.gridDiv.value) };
   uiDirty = true;
@@ -769,6 +792,24 @@ engine.onSmithError = (why) => {
  * Starting from a stop with the cursor outside the selection jumps to its
  * beginning; a pause taken inside the selection resumes where it stopped.
  */
+/**
+ * Seek asked for by a click. While a selection is playing, a click outside it
+ * restarts the loop from its beginning: anything else would either play material
+ * the loop is about to skip, or leave the cursor stranded outside the region the
+ * player keeps circling.
+ */
+function seekFromUser(t: number): void {
+  let target = t;
+  if (hasLoop && engine.playing) {
+    const a = Math.min(loopA, loopB);
+    const b = Math.max(loopA, loopB);
+    if (target < a || target > b) target = a;
+  }
+  if (Math.abs(target - lastUserSeek) < 1e-6) return;   // no restart on every drag step
+  lastUserSeek = target;
+  engine.seek(target);
+}
+
 function togglePlay(): void {
   notePos = engine.position;
   if (!engine.playing && hasLoop) {
@@ -900,7 +941,8 @@ el.ovl.addEventListener('pointerdown', (e) => {
       if (hit >= 0) { removeMarker(hit); return; }
     }
     mode = 'scrub';
-    engine.seek(timeAt(x));
+    lastUserSeek = -1;
+    seekFromUser(timeAt(x));
   } else if (gridEditing && y >= TOP) {
     // while the grid is being edited the plot belongs to it: a beat under the
     // pointer is dragged, anywhere else the click lands on pointerup
@@ -963,7 +1005,7 @@ el.ovl.addEventListener('pointermove', (e) => {
       break;
     }
     case 'scrub':
-      engine.seek(timeAt(x));
+      seekFromUser(timeAt(x));
       break;
     case 'gridBeat':
       if (dragBeat >= 0) gridDragTo(dragBeat, timeAt(x));
@@ -986,7 +1028,7 @@ el.ovl.addEventListener('pointerup', (e) => {
   const r = el.ovl.getBoundingClientRect();
   const x = e.clientX - r.left;
   if (mode === 'gridBeat' && dragBeat < 0 && moved < 4) gridClick(timeAt(x));
-  else if (mode === 'pan' && moved < 4) engine.seek(timeAt(x));
+  else if (mode === 'pan' && moved < 4) { lastUserSeek = -1; seekFromUser(timeAt(x)); }
   if (mode === 'loopNew' && moved < 4) clearLoop();
   mode = 'none';
   uiDirty = true;
@@ -1181,7 +1223,8 @@ function msg(text: string): void { el.stMsg.textContent = text; }
 // small handle for debugging / automated smoke tests
 (window as unknown as Record<string, unknown>).__scribe = {
   engine, view, spectro, setLoopRange, addMarker, addPitch, removePitch, persist,
-  setGrid(g: TimeGrid | null) { grid = g; gridStage = g ? 2 : 0; uiDirty = true; },
+  beatAt, xOfTime, timeAt,
+  setGrid(g: TimeGrid | null) { grid = g; gridStage = g ? 2 : 0; showGridHint(); uiDirty = true; },
   get state() {
     return {
       duration, hasLoop, loopA, loopB, markers, pitches, trackName,

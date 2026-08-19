@@ -152,6 +152,8 @@
           <div id="gridBar" class="hide" role="status" aria-live="polite">
             <span class="dot" aria-hidden="true"></span>
             <span id="gridHint">Click the first beat</span>
+            <span id="gridTempo" class="tempo"></span>
+            <button class="btn tiny hide" id="gridClear" title="Drop the grid and start from the first beat again">Clear</button>
             <button class="btn tiny" id="gridSave">Save grid</button>
             <button class="btn tiny" id="gridCancel">Cancel</button>
           </div>
@@ -217,7 +219,7 @@
         <div class="frow">
           <label class="tip" data-tip="How many lines fill each beat: 1/1 draws the beats alone, 1/4 adds three lines inside every beat" for="gridDiv">Division</label>
           <select id="gridDiv">
-            <option value="1">1/1 — beats only</option>
+            <option value="1">1/1 (beats only)</option>
             <option value="2">1/2</option>
             <option value="4" selected>1/4</option>
             <option value="8">1/8</option>
@@ -297,7 +299,7 @@
           <dt>drag · loop edge</dt><dd>move that bound</dd>
           <dt>shift · drag</dt><dd>select on the plot</dd>
           <dt>right click · plot</dt><dd>pin a note, or drop it</dd>
-          <dt>click · plot in grid edit</dt><dd>first beat, then the next · again to clear</dd>
+          <dt>click · plot in grid edit</dt><dd>first beat, then the next</dd>
           <dt>drag · beat</dt><dd>first moves the grid, others set the tempo</dd>
           <dt>right click · ruler</dt><dd>add a marker, or drop it</dd>
           <dt>ctrl · click flag</dt><dd>drop that marker</dd>
